@@ -1,80 +1,184 @@
-name: Auto Update Rules and Scripts
+The snippet represents a complete rewrite of the workflow file with a different name, schedule, and entirely different job structure. I'll perform a full file replacement.
+
+```
+name: Auto Update from Multiple Sources
 
 on:
   schedule:
-    - cron: '0 20 * * *'  # 每天 UTC 20:00 (北京时间次日 04:00)
-  workflow_dispatch:  # 支持手动触发
-  push:
-    branches: [master]
+    - cron: '0 8 * * *'  # 每天 UTC 08:00 (北京时间 16:00)
+  workflow_dispatch:  # 手动触发
 
 env:
   Bark-Key: ${{ secrets.Bark_Key }}
-  Bark-URL: ${{ secrets.Bark_Url }}
 
 jobs:
-  update:
+  sync:
     runs-on: ubuntu-latest
-    name: Auto Update
+    name: Sync Rules and Scripts
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
-      - name: Configure Git
+      - name: Setup Environment
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add upstream https://github.com/blackmatrix7/ios_rule_script.git
-          echo "远程仓库配置完成"
+          sudo apt-get update -y
+          sudo apt-get install -y python3 jq git
+          echo "环境准备完成"
 
-      - name: Fetch Upstream Updates
+      - name: Create Temp Directories
         run: |
-          echo "从原仓库拉取最新更新..."
-          git fetch upstream master --quiet || true
-          echo "本地分支: ${{ github.ref_name }}"
+          mkdir -p /tmp/sources
+          mkdir -p /tmp/rules
+          mkdir -p /tmp/rewrites
+          mkdir -p /tmp/scripts
+          echo "目录创建完成"
 
-      - name: Sync Directories from Upstream
+      - name: Clone Sources (Parallel)
         run: |
-          SYNC_DIRS="rule rewrite script source blank icon"
+          cd /tmp/sources
+          # 分流规则源
+          git clone --depth 1 https://github.com/magical404/MagicRule 2>/dev/null || echo "⚠️ MagicRule 克隆失败"
+          git clone --depth 1 https://github.com/qingrex/LoonKissSurge 2>/dev/null || echo "⚠️ LoonKissSurge 克隆失败"
+          git clone --depth 1 https://github.com/zqzess/rule_for_quantumultX 2>/dev/null || echo "⚠️ zqzess 克隆失败"
+          git clone --depth 1 https://github.com/Orz-3/QuantumultX 2>/dev/null || echo "⚠️ Orz-3 克隆失败"
+          git clone --depth 1 https://github.com/w37fhy/QuantumultX 2>/dev/null || echo "⚠️ w37fhy 克隆失败"
+          git clone --depth 1 https://github.com/KOP-XIAO/QuantumultX 2>/dev/null || echo "⚠️ KOP-XIAO 克隆失败"
+          git clone --depth 1 https://github.com/cc63/Surge 2>/dev/null || echo "⚠️ cc63 克隆失败"
           
-          for dir in $SYNC_DIRS; do
-            echo "同步: $dir"
-            if git show upstream/master:$dir >/dev/null 2>&1; then
-              git checkout upstream/master -- $dir 2>/dev/null || true
-              echo "  ✅ $dir 已同步"
-            else
-              echo "  ⚠️ $dir 分支上不存在或无法同步"
+          # 复写和脚本源
+          git clone --depth 1 https://github.com/deezertidal/QuantumultX-Rewrite 2>/dev/null || echo "⚠️ deezertidal 克隆失败"
+          git clone --depth 1 https://github.com/Tartarus2014/Loon-Script 2>/dev/null || echo "⚠️ Tartarus2014 克隆失败"
+          git clone --depth 1 https://github.com/githubdulong/Script 2>/dev/null || echo "⚠️ githubdulong 克隆失败"
+          git clone --depth 1 https://github.com/Maasea/sgmodule 2>/dev/null || echo "⚠️ Maasea 克隆失败"
+          
+          # 统计
+          echo "已克隆仓库: $(ls /tmp/sources | grep -v '^\.' | wc -l) 个"
+
+      - name: Sync Rules (Clash & QuantumultX)
+        run: |
+          echo "=== 同步 Clash 规则 ==="
+          src=/tmp/sources/MagicRule
+          if [ -d "$src" ]; then
+            for d in "$src"/rules/Clash*/*.yaml "$src"/rules/Clash*; do
+              if [ -f "$d" ]; then
+                cp "$d" "rule/Clash/sw1.yaml" 2>/dev/null
+              fi
+            done
+            echo "  ✅ MagicRule Clash 规则已同步"
+          else
+            echo "  ❌ MagicRule 不存在"
+          fi
+
+          echo "=== 同步 QuantumultX 规则 ==="
+          for src in /tmp/sources/*/QuantumultX*; do
+            if [ -d "$src" ]; then
+              echo "  同步: $src"
+              for f in "$src"/*.conf "$src"/*.list; do
+                if [ -f "$f" ]; then
+                  cp "$f" "rule/QuantumultX/" 2>/dev/null
+                fi
+              done
             fi
           done
+          echo "  ✅ QuantumultX 规则同步完成"
 
-      - name: Check Changes
+          echo "=== 同步 Surge 规则 ==="
+          src=/tmp/sources/cc63/Surge
+          if [ -d "$src" ]; then
+            for f in "$src"/*.conf "$src"/*.rules; do
+              if [ -f "$f" ]; then
+                cp "$f" "rule/Surge/" 2>/dev/null
+              fi
+            done
+          fi
+          echo "  ✅ Surge 规则同步完成"
+
+      - name: Sync Rewrites
         run: |
-          git status --porcelain
-          echo "---"
-          echo "更新完成，检查变更"
+          echo "=== 同步复写规则 ==="
+          src=/tmp/sources/QuantumultX-Rewrite
+          if [ -d "$src" ]; then
+            for f in "$src"/*/*.conf "$src"/*.conf "$src"/*.rewrite; do
+              if [ -f "$f" ]; then
+                cp "$f" "rewrite/QuantumultX/" 2>/dev/null
+              fi
+            done
+            echo "  ✅ QuantumultX 复写规则已同步"
+          fi
+          
+          src=/tmp/sources/sgmodule
+          if [ -d "$src" ]; then
+            for f in "$src"/*.conf; do
+              if [ -f "$f" ]; then
+                cp "$f" "rewrite/Surge/" 2>/dev/null
+              fi
+            done
+            echo "  ✅ Surge 模块已同步"
+          fi
 
-      - name: Commit and Push Changes
+      - name: Sync Scripts
+        run: |
+          echo "=== 同步脚本 ==="
+          src=/tmp/sources/Loon-Script
+          if [ -d "$src" ]; then
+            mkdir -p script/loon
+            for f in "$src"/*.js; do
+              if [ -f "$f" ]; then
+                cp "$f" "script/loon/" 2>/dev/null
+              fi
+            done
+            echo "  ✅ Loon 脚本已同步"
+          fi
+          
+          src=/tmp/sources/Script
+          if [ -d "$src" ]; then
+            for f in "$src"/*.js; do
+              if [ -f "$f" ]; then
+                cp "$f" "script/" 2>/dev/null
+              fi
+            done
+            echo "  ✅ 脚本已同步"
+          fi
+
+      - name: Check Updates
+        run: |
+          echo "=== 检查更新 ==="
+          git status --porcelain
+          if git status --porcelain | grep -v "rule\|rewrite\|script" | grep -q .; then
+            echo "检测到非预期更改"
+            git status | head -30
+          else
+            echo "未检测到意外更改"
+          fi
+
+      - name: Commit and Push
+        if: always()
         run: |
           git add -A
           if git diff --cached --quiet; then
             echo "没有需要更新的更改"
           else
-            git commit -m "Auto Update: $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin master --quiet || echo "推送失败"
-            echo "✅ 更新已提交并推送"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "Auto Update: $(date +'%Y-%m-%d %H:%M')"
+            git push https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git master || echo "推送失败"
+            echo "✅ 已推送"
           fi
 
-      - name: Send Notification
+      - name: Send Bark Notification
         if: always()
         run: |
           if [ -n "$Bark-Key" ]; then
-            curl -s -X POST "https://api.day.app/$Bark-Key/Auto_Update_Notify" \
+            CHANGED=$(git status --porcelain | wc -l)
+            curl -s -X POST "https://api.day.app/$Bark-Key/Rules_Repo_Update" \
               -H "Content-Type: application/json" \
-              -d "{\"title\":\"规则/脚本自动更新完成\",\"body\":\"分支:${{ github.ref_name }}\\n时间:$(date +'%Y-%m-%d %H:%M:%S')\\n状态:$(git log -1 --format=%H)\\n修改文件:$(git status --porcelain | wc -l)\"}"
-            echo "Bark 通知已发送"
+              -d "{\"title\":\"自动更新完成\",\"body\":\"修改文件数: $CHANGED 个\\n时间: $(date +'%Y-%m-%d %H:%M')\",\"level\":\"passive\"}"
+            echo "✅ Bark 通知已发送"
           else
-            echo "未配置 Bark，跳过通知"
+            echo "未配置 Bark Key，跳过通知"
           fi
+```
