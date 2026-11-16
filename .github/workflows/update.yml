@@ -1,0 +1,80 @@
+name: Auto Update Rules and Scripts
+
+on:
+  schedule:
+    - cron: '0 20 * * *'  # 每天 UTC 20:00 (北京时间次日 04:00)
+  workflow_dispatch:  # 支持手动触发
+  push:
+    branches: [master]
+
+env:
+  Bark-Key: ${{ secrets.Bark_Key }}
+  Bark-URL: ${{ secrets.Bark_Url }}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    name: Auto Update
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/blackmatrix7/ios_rule_script.git
+          echo "远程仓库配置完成"
+
+      - name: Fetch Upstream Updates
+        run: |
+          echo "从原仓库拉取最新更新..."
+          git fetch upstream master --quiet || true
+          echo "本地分支: ${{ github.ref_name }}"
+
+      - name: Sync Directories from Upstream
+        run: |
+          SYNC_DIRS="rule rewrite script source blank icon"
+          
+          for dir in $SYNC_DIRS; do
+            echo "同步: $dir"
+            if git show upstream/master:$dir >/dev/null 2>&1; then
+              git checkout upstream/master -- $dir 2>/dev/null || true
+              echo "  ✅ $dir 已同步"
+            else
+              echo "  ⚠️ $dir 分支上不存在或无法同步"
+            fi
+          done
+
+      - name: Check Changes
+        run: |
+          git status --porcelain
+          echo "---"
+          echo "更新完成，检查变更"
+
+      - name: Commit and Push Changes
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "没有需要更新的更改"
+          else
+            git commit -m "Auto Update: $(date +'%Y-%m-%d %H:%M:%S')"
+            git push origin master --quiet || echo "推送失败"
+            echo "✅ 更新已提交并推送"
+          fi
+
+      - name: Send Notification
+        if: always()
+        run: |
+          if [ -n "$Bark-Key" ]; then
+            curl -s -X POST "https://api.day.app/$Bark-Key/Auto_Update_Notify" \
+              -H "Content-Type: application/json" \
+              -d "{\"title\":\"规则/脚本自动更新完成\",\"body\":\"分支:${{ github.ref_name }}\\n时间:$(date +'%Y-%m-%d %H:%M:%S')\\n状态:$(git log -1 --format=%H)\\n修改文件:$(git status --porcelain | wc -l)\"}"
+            echo "Bark 通知已发送"
+          else
+            echo "未配置 Bark，跳过通知"
+          fi

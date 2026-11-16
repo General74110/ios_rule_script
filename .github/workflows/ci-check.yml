@@ -1,0 +1,59 @@
+name: CI Check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    name: Check Rules and Scripts
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Rule Files
+        run: |
+          echo "=== 检查规则文件 ==="
+          for client in Clash Surge QuantumultX Loon Shadowrocket Stash; do
+            if [ -d "rule/$client" ]; then
+              echo "✅ $client 规则目录存在"
+              count=$(find "rule/$client" -name "*.conf" -o -name "*.yaml" -o -name "*.list" -o -name "*.svgtab" 2>/dev/null | wc -l)
+              echo "   文件数: $count"
+            else
+              echo "❌ $client 规则目录不存在"
+            fi
+          done
+
+      - name: Check Script Files
+        run: |
+          echo "=== 检查脚本文件 ==="
+          for dir in script/*/; do
+            if [ -f "$dir/README.md" ]; then
+              echo "✅ $dir 有说明文档"
+            else
+              echo "⚠️ $dir 缺少说明文档"
+            fi
+          
+            if ls "$dir"*.js 1>/dev/null 2>&1; then
+              echo "   JS文件: $(ls "$dir"*.js | wc -l)"
+            fi
+          done
+
+      - name: Validate JSON Files
+        run: |
+          echo "=== 验证 JSON 格式 ==="
+          for file in "script/boxjs.json" "script/gallery.json" "icon/icon.json"; do
+            if [ -f "$file" ]; then
+              if python3 -m json.tool "$file" > /dev/null 2>&1; then
+                echo "✅ $file 格式正确"
+              else
+                echo "❌ $file 格式错误"
+                exit 1
+              fi
+            fi
+          done
